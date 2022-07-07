@@ -120,9 +120,11 @@ int main(int argc, char* argv[]){
         cerr << "Errore nel context OpenCL";
     }
 
-    const cl_queue_properties props(CL_QUEUE_PROFILING_ENABLE);
+    const cl_queue_properties props[] = {
+        CL_QUEUE_PROPERTIES, CL_QUEUE_PROFILING_ENABLE, 0
+    };
 
-    command_queue = clCreateCommandQueueWithProperties(context, device, &props, &errNum);
+    command_queue = clCreateCommandQueueWithProperties(context, device, props, &errNum);
     if(errNum != CL_SUCCESS){
         cout << "Errore nella creazione command queue OpenCL!" << endl;
     }
@@ -132,7 +134,7 @@ int main(int argc, char* argv[]){
         cout << "Errore nella creazione del programma OpenCL!" << endl;
     }
 
-    clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+    errNum = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
     if(errNum != CL_SUCCESS){
         cout << "Errore nella build dell'eseguibile OpenCL!" << endl;
     }
@@ -164,10 +166,10 @@ int main(int argc, char* argv[]){
     
     cl_mem input_img = clCreateImage(
         context,
-        CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR,
+        CL_MEM_READ_ONLY,
         (const cl_image_format *) &format,
         (const cl_image_desc *) &desc,
-        img_in.data(),
+        NULL,
         &errNum
     );
 
@@ -177,7 +179,7 @@ int main(int argc, char* argv[]){
 
     // OUTPUT IMAGE //
 
-    CImg<unsigned char> img_out(img_in.width(), img_in.height(), 1, 4);
+    CImg<unsigned char> img_out(img_in.width(), img_in.height(), img_in.depth(), img_in.spectrum());
     //cout << img_out.data() << endl;
 
     format = {
@@ -198,10 +200,10 @@ int main(int argc, char* argv[]){
 
     cl_mem output_img = clCreateImage(
         context,
-        CL_MEM_WRITE_ONLY | CL_MEM_USE_HOST_PTR,
+        CL_MEM_WRITE_ONLY,
         (const cl_image_format *) &format,
         (const cl_image_desc *) &desc,
-        img_out.data(),
+        NULL,
         &errNum
     );
 
@@ -212,15 +214,15 @@ int main(int argc, char* argv[]){
     size_t origins[3] = {0, 0, 0};
     size_t region[3] = {(size_t) img_in.width(), (size_t) img_in.height(), (size_t) 1};
 
-    errNum = clSetKernelArg(kernel, 0, sizeof(cl_mem), input_img);
-    errNum |= clSetKernelArg(kernel, 1, sizeof(cl_mem), output_img);
+    errNum = clSetKernelArg(kernel, 0, sizeof(cl_mem), &input_img);
+    errNum = clSetKernelArg(kernel, 1, sizeof(cl_mem), &output_img);
+
+    auto rgba_buf = convert_cimg_to_rgba_buffer(img_in);
+    errNum = clEnqueueWriteImage(command_queue, input_img, CL_FALSE, origins, region, 0, 0, rgba_buf.data(), 0, NULL, NULL);
 
     size_t global[2] = {(size_t) img_in.width(), (size_t) img_in.height()};
     clEnqueueNDRangeKernel(command_queue, kernel, 2, NULL, global, NULL, 0, NULL, NULL);
 
-    auto rgba_buf = convert_cimg_to_rgba_buffer(img_in);
-    
-    errNum = clEnqueueWriteImage(command_queue, input_img, CL_TRUE, origins, region, 0, 0, rgba_buf.data(), 0, NULL, NULL);
     errNum = clEnqueueReadImage(command_queue, output_img, CL_TRUE, origins, region, 0, 0, rgba_buf.data(), 0, NULL, NULL);
 
     copy_rgba_buffer_to_cimg(rgba_buf, img_out);
